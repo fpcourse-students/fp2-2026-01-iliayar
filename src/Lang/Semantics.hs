@@ -39,7 +39,26 @@ evalExpr expr env = case expr of
     Nothing -> error $ "ERROR: Undefined variable '" <> name <> "'"
     Just value -> value
   BinOp op lhs rhs -> evalBinOp op (evalExpr lhs env) (evalExpr rhs env)
-  Match _ _ -> todo "Match"
+  Match expr branches -> case asum $ map (evalBranch env $ evalExpr expr env) branches of
+    Just value -> value
+    Nothing -> error "Unmatched"
+  Obj ctor fields -> Object ctor $ map (flip evalExpr env) fields
+
+evalBranch :: Env -> Value -> Branch -> Maybe Value
+evalBranch env value (Branch pat expr) = do
+    extEnv <- patternMatch pat value
+    return $ evalExpr expr $ extEnv <> env
+
+patternMatch :: Pattern -> Value -> Maybe Env
+patternMatch (VarPat var) value = Just $ Map.singleton var value
+patternMatch (ConstPat patValue) (Number value)
+    | patValue == value = Just Map.empty
+    | otherwise = Nothing
+patternMatch (CtorPat patCtor fieldPats) (Object ctor fields)
+    | patCtor == ctor && length fieldPats == length fields =
+        mconcat <$> zipWithM patternMatch fieldPats fields
+    | otherwise = Nothing
+patternMatch _ _ = Nothing
 
 -- | Интерпретатор бинарных операций.
 evalBinOp :: BinOp -> Value -> Value -> Value
@@ -49,6 +68,8 @@ evalBinOp op = case op of
   Less -> wrapBool (<)
   LessEq -> wrapBool (<=)
   Equal -> wrapBool (==)
+  Minus -> wrapNum (-)
+  Div -> wrapNum div
   where
     wrapNum op lhs rhs = Number $ unpackNum lhs `op` unpackNum rhs
     wrapBool op lhs rhs = if unpackNum lhs `op` unpackNum rhs then trueValue else falseValue
